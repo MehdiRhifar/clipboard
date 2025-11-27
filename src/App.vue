@@ -1,5 +1,5 @@
 <script setup>
-import {ref, watch} from 'vue'
+import {ref, watch, onMounted} from 'vue'
 import {supabase} from './supabase'
 import CryptoJS from 'crypto-js'
 
@@ -7,6 +7,24 @@ const roomCode = ref('')
 const currentRoom = ref('')
 const textContent = ref('')
 const isConnected = ref(false)
+
+// Fonctions pour gérer l'URL
+const getSessionFromURL = () => {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('session')
+}
+
+const updateURL = (sessionCode) => {
+  const url = new URL(window.location)
+  url.searchParams.set('session', sessionCode)
+  window.history.pushState({}, '', url)
+}
+
+const removeSessionFromURL = () => {
+  const url = new URL(window.location)
+  url.searchParams.delete('session')
+  window.history.pushState({}, '', url)
+}
 
 // Fonctions de chiffrement/déchiffrement
 const encrypt = (text, key) => {
@@ -39,11 +57,16 @@ const createNewSession = () => {
   joinSession()
 }
 
-const joinSession = async () => {
+const joinSession = async (updateUrl = true) => {
   if (!roomCode.value.trim()) return
 
   currentRoom.value = roomCode.value.trim().toUpperCase()
   isConnected.value = true
+
+  // Mettre à jour l'URL avec le code de session (sauf si on gère la navigation navigateur)
+  if (updateUrl) {
+    updateURL(currentRoom.value)
+  }
 
   await loadContent()
   subscribeToChanges()
@@ -132,7 +155,7 @@ watch(textContent, (newValue) => {
   }, 500)
 })
 
-const disconnect = () => {
+const disconnect = (updateUrl = true) => {
   isConnected.value = false
   currentRoom.value = ''
   roomCode.value = ''
@@ -141,7 +164,38 @@ const disconnect = () => {
     supabase.removeChannel(channel)
     channel = null
   }
+
+  // Retirer la session de l'URL (sauf si on gère la navigation navigateur)
+  if (updateUrl) {
+    removeSessionFromURL()
+  }
 }
+
+// Au montage du composant, vérifier si une session est dans l'URL
+onMounted(() => {
+  const sessionFromURL = getSessionFromURL()
+  if (sessionFromURL) {
+    roomCode.value = sessionFromURL
+    joinSession(false) // Ne pas modifier l'URL, elle contient déjà la session
+  }
+
+  // Gérer la navigation avec les boutons retour/avant du navigateur
+  window.addEventListener('popstate', () => {
+    const sessionFromURL = getSessionFromURL()
+    if (sessionFromURL && sessionFromURL !== currentRoom.value) {
+      // L'utilisateur a navigué vers une URL avec une session différente
+      roomCode.value = sessionFromURL
+      if (isConnected.value) {
+        // Déconnecter de la session actuelle avant de rejoindre la nouvelle
+        disconnect(false) // Ne pas modifier l'URL car elle est déjà à jour
+      }
+      joinSession(false) // Ne pas modifier l'URL car elle est déjà à jour
+    } else if (!sessionFromURL && isConnected.value) {
+      // L'utilisateur a navigué vers une URL sans session
+      disconnect(false) // Ne pas modifier l'URL car elle est déjà à jour
+    }
+  })
+})
 </script>
 
 <template>
