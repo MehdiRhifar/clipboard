@@ -1,11 +1,29 @@
 <script setup>
 import {ref, watch} from 'vue'
 import {supabase} from './supabase'
+import CryptoJS from 'crypto-js'
 
 const roomCode = ref('')
 const currentRoom = ref('')
 const textContent = ref('')
 const isConnected = ref(false)
+
+// Fonctions de chiffrement/déchiffrement
+const encrypt = (text, key) => {
+  if (!text) return ''
+  return CryptoJS.AES.encrypt(text, key).toString()
+}
+
+const decrypt = (encryptedText, key) => {
+  if (!encryptedText) return ''
+  try {
+    const bytes = CryptoJS.AES.decrypt(encryptedText, key)
+    return bytes.toString(CryptoJS.enc.Utf8)
+  } catch (err) {
+    console.error('Déchiffrement échoué:', err)
+    return ''
+  }
+}
 
 const generateCode = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -24,8 +42,7 @@ const createNewSession = () => {
 const joinSession = async () => {
   if (!roomCode.value.trim()) return
 
-  const code = roomCode.value.trim().toUpperCase()
-  currentRoom.value = code
+  currentRoom.value = roomCode.value.trim().toUpperCase()
   isConnected.value = true
 
   await loadContent()
@@ -40,8 +57,10 @@ const loadContent = async () => {
         .eq('room_code', currentRoom.value)
         .maybeSingle()
 
-    if (data) {
-      textContent.value = data.content || ''
+    if (data && data.content) {
+      // Déchiffrer le contenu avec le code de session
+      textContent.value = decrypt(data.content, currentRoom.value)
+      console.log('Contenu déchiffré et chargé')
     }
   } catch (err) {
     console.error('Erreur:', err)
@@ -58,10 +77,11 @@ const subscribeToChanges = () => {
   // Écouter les messages broadcast
   channel
       .on('broadcast', {event: 'text-update'}, (payload) => {
-        console.log('Broadcast received')
+        console.log('Broadcast chiffré reçu')
         // Flag pour éviter de déclencher le watch
         isReceivingBroadcast = true
-        textContent.value = payload.payload.content
+        // Déchiffrer le contenu avec le code de session
+        textContent.value = decrypt(payload.payload.content, currentRoom.value)
         setTimeout(() => {
           isReceivingBroadcast = false
         }, 100)
@@ -82,26 +102,29 @@ watch(textContent, (newValue) => {
   clearTimeout(saveTimeout)
   saveTimeout = setTimeout(async () => {
     try {
-      console.log('Saving...')
-      // Sauvegarder dans la DB
+      console.log('Chiffrement et sauvegarde...')
+      // Chiffrer le contenu avec le code de session
+      const encrypted = encrypt(newValue, currentRoom.value)
+
+      // Sauvegarder le contenu CHIFFRÉ dans la DB
       await supabase
           .from('clipboards')
           .upsert({
             room_code: currentRoom.value,
-            content: newValue,
+            content: encrypted,
             updated_at: new Date().toISOString()
           }, {
             onConflict: 'room_code'
           })
 
-      // Envoyer un broadcast aux autres clients
+      // Envoyer un broadcast avec le contenu CHIFFRÉ
       if (channel) {
         await channel.send({
           type: 'broadcast',
           event: 'text-update',
-          payload: { content: newValue }
+          payload: { content: encrypted }
         })
-        console.log('Broadcast sent')
+        console.log('Broadcast chiffré envoyé')
       }
     } catch (err) {
       console.error('Erreur:', err)
