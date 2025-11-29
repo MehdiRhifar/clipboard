@@ -10,6 +10,19 @@ const route = useRoute()
 const sessionCode = ref('')
 const textContent = ref('')
 
+onMounted(() => {
+  sessionCode.value = route.params.sessionCode.toLowerCase().trim()
+  loadContent()
+  subscribeToChanges()
+})
+
+onUnmounted(() => {
+  if (channel) {
+    supabase.removeChannel(channel)
+    channel = null
+  }
+})
+
 // Fonctions de chiffrement/déchiffrement
 const encrypt = (text, key) => {
   if (!text) return ''
@@ -108,19 +121,6 @@ const disconnect = () => {
   }
   router.push('/')
 }
-
-onMounted(() => {
-  sessionCode.value = route.params.sessionCode.toLowerCase()
-  loadContent()
-  subscribeToChanges()
-})
-
-onUnmounted(() => {
-  if (channel) {
-    supabase.removeChannel(channel)
-    channel = null
-  }
-})
 </script>
 
 <template>
